@@ -66,7 +66,7 @@ def extract_features(text):
 def prepare_data(df, date_col, ref_col, libelle_col, debit_col=None, credit_col=None, montant_col=None, is_compta=True):
     clean_df = df.copy()
     clean_df['_row_id'] = range(len(clean_df))
-    clean_df['_date'] = pd.to_datetime(clean_df[date_col], errors='coerce')
+    clean_df['_date'] = pd.to_datetime(clean_df[date_col], errors='coerce', dayfirst=True)
     
     if ref_col and ref_col in clean_df.columns:
         clean_df['_ref_original'] = clean_df[ref_col].apply(clean_reference)
