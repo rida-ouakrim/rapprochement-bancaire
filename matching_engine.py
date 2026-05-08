@@ -140,36 +140,7 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
     matched_c_ids = set()
     matched_b_ids = set()
     
-    # -------------------------------------------------------------
-    # ÉTAPE 1 : Rapprochement Exact par Référence & Montant
-    # -------------------------------------------------------------
-    for _, c_row in c_df.iterrows():
-        c_ref = c_row['_ref']
-        c_montant = c_row['_montant']
-        c_id = c_row['_row_id']
-        
-        if c_ref == "":
-            continue
-            
-        b_candidates = b_df[
-            (b_df['_ref'] == c_ref) & 
-            (np.isclose(b_df['_montant'], c_montant, atol=0.01)) & 
-            (~b_df['_row_id'].isin(matched_b_ids))
-        ]
-        
-        if not b_candidates.empty:
-            b_candidates = b_candidates.copy()
-            b_candidates['date_diff'] = (b_candidates['_date'] - c_row['_date']).abs()
-            best_b_row = b_candidates.sort_values('date_diff').iloc[0]
-            b_id = best_b_row['_row_id']
-            
-            matched_c_ids.add(c_id)
-            matched_b_ids.add(b_id)
-            matched_pairs.append({
-                'c_row_id': c_id,
-                'b_row_id': b_id,
-                'methode': f'Référence exacte ({c_row["_op_type"]}) & Montant'
-            })
+    group_tolerance = max(date_tolerance, 30)
 
     # -------------------------------------------------------------
     # ÉTAPE 1.5 : Rapprochement par Référence de Remise Commune (1-to-many, many-to-1)
@@ -240,7 +211,7 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
                 continue
             b_avg_date = b_dates.min()
             c_candidates['date_diff_days'] = (c_candidates['_date'] - b_avg_date).dt.days.abs()
-            valid_c = c_candidates[c_candidates['date_diff_days'] <= date_tolerance]
+            valid_c = c_candidates[c_candidates['date_diff_days'] <= group_tolerance]
             
             if not valid_c.empty:
                 best_c = valid_c.sort_values('date_diff_days').iloc[0]
@@ -279,7 +250,7 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
                 continue
             c_avg_date = c_dates.min()
             b_candidates['date_diff_days'] = (b_candidates['_date'] - c_avg_date).dt.days.abs()
-            valid_b = b_candidates[b_candidates['date_diff_days'] <= date_tolerance]
+            valid_b = b_candidates[b_candidates['date_diff_days'] <= group_tolerance]
             
             if not valid_b.empty:
                 best_b = valid_b.sort_values('date_diff_days').iloc[0]
@@ -293,6 +264,39 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
                         'b_row_id': b_id,
                         'methode': f'Remise groupée Compta Réf ({ref})'
                     })
+
+    # -------------------------------------------------------------
+    # ÉTAPE 1 : Rapprochement Exact par Référence & Montant
+    # -------------------------------------------------------------
+    for _, c_row in c_df.iterrows():
+        c_id = c_row['_row_id']
+        if c_id in matched_c_ids:
+            continue
+        c_ref = c_row['_ref']
+        c_montant = c_row['_montant']
+        
+        if c_ref == "":
+            continue
+            
+        b_candidates = b_df[
+            (b_df['_ref'] == c_ref) & 
+            (np.isclose(b_df['_montant'], c_montant, atol=0.01)) & 
+            (~b_df['_row_id'].isin(matched_b_ids))
+        ]
+        
+        if not b_candidates.empty:
+            b_candidates = b_candidates.copy()
+            b_candidates['date_diff'] = (b_candidates['_date'] - c_row['_date']).abs()
+            best_b_row = b_candidates.sort_values('date_diff').iloc[0]
+            b_id = best_b_row['_row_id']
+            
+            matched_c_ids.add(c_id)
+            matched_b_ids.add(b_id)
+            matched_pairs.append({
+                'c_row_id': c_id,
+                'b_row_id': b_id,
+                'methode': f'Référence exacte ({c_row["_op_type"]}) & Montant'
+            })
 
     # -------------------------------------------------------------
     # ÉTAPE 2 : Rapprochement par Remise (Somme Compta = Ligne Banque, ou inversement)
