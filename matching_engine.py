@@ -13,6 +13,18 @@ def clean_reference(ref):
         return str(int(ref_str))
     return ref_str
 
+def extract_remise_ref(text):
+    """
+    Extrait spécifiquement le numéro d'une remise (ex: REMISE 000095175 -> 95175).
+    """
+    if pd.isna(text):
+        return ""
+    text = str(text).upper().replace('É', 'E').replace('È', 'E')
+    match = re.search(r'REMISE\s*0*(\d+)', text)
+    if match:
+        return match.group(1)
+    return ""
+
 def extract_features(text):
     """
     Extrait les informations pertinentes d'un libellé (numéro de chèque, type d'opération).
@@ -82,6 +94,7 @@ def prepare_data(df, date_col, ref_col, libelle_col, debit_col=None, credit_col=
     features = clean_df['_libelle'].apply(extract_features)
     clean_df['_extracted_ref'] = features.apply(lambda x: x[0])
     clean_df['_op_type'] = features.apply(lambda x: x[1])
+    clean_df['_remise_ref'] = clean_df['_libelle'].apply(extract_remise_ref)
     
     # Priority to extracted ref, fallback to original ref
     clean_df['_ref'] = clean_df.apply(lambda row: row['_extracted_ref'] if row['_extracted_ref'] != "" else row['_ref_original'], axis=1)
@@ -159,19 +172,60 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
             })
 
     # -------------------------------------------------------------
-    # ÉTAPE 2 : Rapprochement par Remise (Somme Compta = Ligne Banque)
+    # ÉTAPE 1.5 : Rapprochement par Référence de Remise Commune (1-to-many, many-to-1)
     # -------------------------------------------------------------
     unmatched_c = c_df[~c_df['_row_id'].isin(matched_c_ids)]
     unmatched_b = b_df[~b_df['_row_id'].isin(matched_b_ids)]
     
-    # Trouver les lignes de banque "REMISE"
+    all_remise_refs = set(unmatched_c['_remise_ref'].dropna().unique()) | set(unmatched_b['_remise_ref'].dropna().unique())
+    all_remise_refs.discard("")
+    
+    for ref in all_remise_refs:
+        c_rows = unmatched_c[
+            (unmatched_c['_remise_ref'] == ref) | 
+            (unmatched_c['_ref'] == ref) |
+            (unmatched_c['_ref_original'] == ref)
+        ]
+        b_rows = unmatched_b[
+            (unmatched_b['_remise_ref'] == ref) | 
+            (unmatched_b['_ref'] == ref) |
+            (unmatched_b['_ref_original'] == ref)
+        ]
+        
+        c_rows = c_rows[~c_rows['_row_id'].isin(matched_c_ids)]
+        b_rows = b_rows[~b_rows['_row_id'].isin(matched_b_ids)]
+        
+        if not c_rows.empty and not b_rows.empty:
+            c_sum = c_rows['_montant'].sum()
+            b_sum = b_rows['_montant'].sum()
+            
+            if np.isclose(c_sum, b_sum, atol=0.01):
+                for _, r in c_rows.iterrows():
+                    matched_c_ids.add(r['_row_id'])
+                for _, r in b_rows.iterrows():
+                    matched_b_ids.add(r['_row_id'])
+                
+                for _, c_r in c_rows.iterrows():
+                    for _, b_r in b_rows.iterrows():
+                        matched_pairs.append({
+                            'c_row_id': c_r['_row_id'],
+                            'b_row_id': b_r['_row_id'],
+                            'methode': f'Remise groupée par Réf ({ref})'
+                        })
+
+    # -------------------------------------------------------------
+    # ÉTAPE 2 : Rapprochement par Remise (Somme Compta = Ligne Banque, ou inversement)
+    # -------------------------------------------------------------
+    unmatched_c = c_df[~c_df['_row_id'].isin(matched_c_ids)]
+    unmatched_b = b_df[~b_df['_row_id'].isin(matched_b_ids)]
+    
+    # Trouver les lignes de banque "REMISE" (Many Compta -> One Banque)
     b_remises = unmatched_b[unmatched_b['_op_type'] == "REMISE"]
     for _, b_row in b_remises.iterrows():
         b_montant = b_row['_montant']
         b_date = b_row['_date']
         b_id = b_row['_row_id']
         
-        # On cherche des combinaisons de chèques ou remises en compta à la même date
         if pd.isna(b_date):
             continue
             
@@ -183,7 +237,6 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
         c_candidates['date_diff_days'] = (c_candidates['_date'] - b_date).dt.days.abs()
         c_candidates = c_candidates[c_candidates['date_diff_days'] <= date_tolerance]
         
-        # Si la somme totale correspond (cas simple où il n'y a qu'une remise ce jour-là)
         if np.isclose(c_candidates['_montant'].sum(), b_montant, atol=0.01):
             matched_b_ids.add(b_id)
             for _, c_row in c_candidates.iterrows():
@@ -194,7 +247,6 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
                     'methode': 'Remise groupée par date'
                 })
         else:
-            # Essayer de trouver une seule ligne compta "REMISE" du même montant
             c_single = c_candidates[np.isclose(c_candidates['_montant'], b_montant, atol=0.01)]
             if not c_single.empty:
                 best_c = c_single.sort_values('date_diff_days').iloc[0]
@@ -204,6 +256,36 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
                     'c_row_id': best_c['_row_id'],
                     'b_row_id': b_id,
                     'methode': 'Remise unitaire par montant'
+                })
+
+    # Trouver les lignes de compta "REMISE" (One Compta -> Many Banque)
+    unmatched_c = c_df[~c_df['_row_id'].isin(matched_c_ids)]
+    unmatched_b = b_df[~b_df['_row_id'].isin(matched_b_ids)]
+    c_remises = unmatched_c[unmatched_c['_op_type'] == "REMISE"]
+    for _, c_row in c_remises.iterrows():
+        c_montant = c_row['_montant']
+        c_date = c_row['_date']
+        c_id = c_row['_row_id']
+        
+        if pd.isna(c_date):
+            continue
+            
+        b_candidates = unmatched_b[
+            (unmatched_b['_op_type'].isin(['CHEQUE', 'REMISE'])) &
+            (~unmatched_b['_row_id'].isin(matched_b_ids))
+        ]
+        b_candidates = b_candidates.copy()
+        b_candidates['date_diff_days'] = (b_candidates['_date'] - c_date).dt.days.abs()
+        b_candidates = b_candidates[b_candidates['date_diff_days'] <= date_tolerance]
+        
+        if np.isclose(b_candidates['_montant'].sum(), c_montant, atol=0.01):
+            matched_c_ids.add(c_id)
+            for _, b_row in b_candidates.iterrows():
+                matched_b_ids.add(b_row['_row_id'])
+                matched_pairs.append({
+                    'c_row_id': c_id,
+                    'b_row_id': b_row['_row_id'],
+                    'methode': 'Remise groupée inversée par date'
                 })
                 
     # -------------------------------------------------------------
