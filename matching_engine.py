@@ -214,6 +214,87 @@ def reconcile_dfs(df_compta_raw, df_banque_raw, compta_mapping, banque_mapping, 
                         })
 
     # -------------------------------------------------------------
+    # ÉTAPE 1.7 : Rapprochement de Remises par Somme de Référence Unique (1 côté avec Réf, 1 côté avec Somme Globale)
+    # -------------------------------------------------------------
+    unmatched_c = c_df[~c_df['_row_id'].isin(matched_c_ids)]
+    unmatched_b = b_df[~b_df['_row_id'].isin(matched_b_ids)]
+    
+    # 1. Banque -> Compta (Plusieurs lignes Banque avec même Réf de Remise -> Une seule ligne globale Compta)
+    b_grouped_refs = unmatched_b[unmatched_b['_remise_ref'] != ""]['_remise_ref'].unique()
+    for ref in b_grouped_refs:
+        b_rows = unmatched_b[unmatched_b['_remise_ref'] == ref]
+        b_rows = b_rows[~b_rows['_row_id'].isin(matched_b_ids)]
+        if b_rows.empty:
+            continue
+            
+        b_sum = b_rows['_montant'].sum()
+        c_candidates = unmatched_c[
+            (np.isclose(unmatched_c['_montant'], b_sum, atol=0.01)) &
+            (~unmatched_c['_row_id'].isin(matched_c_ids))
+        ]
+        
+        if not c_candidates.empty:
+            c_candidates = c_candidates.copy()
+            b_dates = b_rows['_date'].dropna()
+            if b_dates.empty:
+                continue
+            b_avg_date = b_dates.min()
+            c_candidates['date_diff_days'] = (c_candidates['_date'] - b_avg_date).dt.days.abs()
+            valid_c = c_candidates[c_candidates['date_diff_days'] <= date_tolerance]
+            
+            if not valid_c.empty:
+                best_c = valid_c.sort_values('date_diff_days').iloc[0]
+                c_id = best_c['_row_id']
+                
+                matched_c_ids.add(c_id)
+                for _, b_r in b_rows.iterrows():
+                    matched_b_ids.add(b_r['_row_id'])
+                    matched_pairs.append({
+                        'c_row_id': c_id,
+                        'b_row_id': b_r['_row_id'],
+                        'methode': f'Remise groupée Banque Réf ({ref})'
+                    })
+
+    # 2. Compta -> Banque (Plusieurs lignes Compta avec même Réf de Remise -> Une seule ligne globale Banque)
+    unmatched_c = c_df[~c_df['_row_id'].isin(matched_c_ids)]
+    unmatched_b = b_df[~b_df['_row_id'].isin(matched_b_ids)]
+    
+    c_grouped_refs = unmatched_c[unmatched_c['_remise_ref'] != ""]['_remise_ref'].unique()
+    for ref in c_grouped_refs:
+        c_rows = unmatched_c[unmatched_c['_remise_ref'] == ref]
+        c_rows = c_rows[~c_rows['_row_id'].isin(matched_c_ids)]
+        if c_rows.empty:
+            continue
+            
+        c_sum = c_rows['_montant'].sum()
+        b_candidates = unmatched_b[
+            (np.isclose(unmatched_b['_montant'], c_sum, atol=0.01)) &
+            (~unmatched_b['_row_id'].isin(matched_b_ids))
+        ]
+        
+        if not b_candidates.empty:
+            b_candidates = b_candidates.copy()
+            c_dates = c_rows['_date'].dropna()
+            if c_dates.empty:
+                continue
+            c_avg_date = c_dates.min()
+            b_candidates['date_diff_days'] = (b_candidates['_date'] - c_avg_date).dt.days.abs()
+            valid_b = b_candidates[b_candidates['date_diff_days'] <= date_tolerance]
+            
+            if not valid_b.empty:
+                best_b = valid_b.sort_values('date_diff_days').iloc[0]
+                b_id = best_b['_row_id']
+                
+                matched_b_ids.add(b_id)
+                for _, c_r in c_rows.iterrows():
+                    matched_c_ids.add(c_r['_row_id'])
+                    matched_pairs.append({
+                        'c_row_id': c_r['_row_id'],
+                        'b_row_id': b_id,
+                        'methode': f'Remise groupée Compta Réf ({ref})'
+                    })
+
+    # -------------------------------------------------------------
     # ÉTAPE 2 : Rapprochement par Remise (Somme Compta = Ligne Banque, ou inversement)
     # -------------------------------------------------------------
     unmatched_c = c_df[~c_df['_row_id'].isin(matched_c_ids)]
