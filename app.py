@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 import os
+import base64
 import plotly.graph_objects as go
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -60,13 +61,25 @@ if not st.session_state.authenticated:
     """, unsafe_allow_html=True)
     
     with st.container():
-        # Utiliser un PNG propre de Wikipédia pour éviter le problème d'affichage SVG sur Streamlit
-        logo_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/MAN_Logo_2012.svg/250px-MAN_Logo_2012.svg.png"
+        # Charger le logo localement et l'encoder en base64 pour l'intégrer proprement à l'HTML
+        logo_html = ""
+        logo_path = "logo.png"
+        if os.path.exists(logo_path):
+            try:
+                with open(logo_path, "rb") as f:
+                    logo_base64 = base64.b64encode(f.read()).decode()
+                logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="width: 140px; margin-bottom: 1.5rem;" alt="MAN Logo">'
+            except Exception:
+                pass
         
+        # Fallback si le logo n'est pas trouvé
+        if not logo_html:
+            logo_html = '<div style="font-size: 3.5rem; margin-bottom: 1.5rem;">🚛</div>'
+            
         with st.form("login_form", clear_on_submit=False):
             st.markdown(f"""
                 <div style="text-align: center;">
-                    <img src="{logo_url}" style="width: 110px; margin-bottom: 1.5rem;" alt="MAN Logo">
+                    {logo_html}
                     <h2 style="font-size: 1.6rem; font-weight: 700; color: #0F172A; margin: 0 0 0.5rem 0; font-family: 'Plus Jakarta Sans', sans-serif;">Accès Sécurisé</h2>
                     <p style="font-size: 0.85rem; color: #64748B; margin: 0 0 2rem 0; line-height: 1.4; font-family: 'Plus Jakarta Sans', sans-serif;">
                         Veuillez saisir votre code d'accès pour accéder à la plateforme de rapprochement bancaire MAN Truck.
@@ -286,7 +299,7 @@ if 'demo_loaded' not in st.session_state:
 
 
 # --- SIDEBAR DE CONFIGURATION ---
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/1/1a/MAN_Logo_2012.svg", width=120)
+st.sidebar.image("logo.png", width=120)
 st.sidebar.markdown("### 🚛 Rapprochement Bancaire")
 st.sidebar.info("Cet outil permet d'automatiser le rapprochement entre le Grand Livre et le Relevé Bancaire en se basant sur les numéros de chèques, les remises et les proximités temporelles.")
 
