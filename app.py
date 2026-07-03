@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import os
 import plotly.graph_objects as go
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -9,6 +10,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 from matching_engine import reconcile_dfs
 from sample_generator import generate_sample_data
+from pdf_extractor import extract_bank_statement_pdf
 
 # Configuration de la page Streamlit
 st.set_page_config(
@@ -17,6 +19,64 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# --- INITIALISATION DE L'ÉTAT D'AUTHENTIFICATION ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+# Écran de connexion si non authentifié
+if not st.session_state.authenticated:
+    st.markdown("""
+        <style>
+        .login-card {
+            max-width: 450px;
+            margin: 8% auto;
+            padding: 2.5rem;
+            background: #FFFFFF;
+            border-radius: 16px;
+            border: 1px solid #E2E8F0;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+            text-align: center;
+        }
+        .login-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #0F172A;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .login-subtitle {
+            font-size: 0.9rem;
+            color: #64748B;
+            margin-bottom: 2rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="login-card">', unsafe_allow_html=True)
+    
+    # Centrer le logo
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.image("https://upload.wikimedia.org/wikipedia/commons/1/1a/MAN_Logo_2012.svg", width=120)
+        
+    st.markdown('<div class="login-title">Accès Sécurisé</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-subtitle">Veuillez saisir votre code d\'accès pour accéder à la plateforme de rapprochement MAN Truck.</div>', unsafe_allow_html=True)
+    
+    # Zone de saisie
+    code_input = st.text_input("Code d'accès", type="password", key="login_code_input", label_visibility="collapsed", placeholder="Saisir le code d'accès (ex: MAN2026)")
+    
+    if st.button("Se connecter 🔓", type="primary", use_container_width=True):
+        if code_input == "MAN2026":
+            st.session_state.authenticated = True
+            st.toast("Connexion réussie !", icon="✅")
+            st.rerun()
+        else:
+            st.error("Code d'accès incorrect. Veuillez réessayer.")
+            
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop() # Arrêter le rendu du reste de la page
+
 
 # Thème CSS personnalisé premium (Intégration d'un style moderne, polices Google Fonts et design épuré)
 st.markdown("""
@@ -223,7 +283,56 @@ date_tolerance = 10
 
 
 # --- ONGLETS PRINCIPAUX ---
-tab_import, tab_matching = st.tabs(["📂 1. Importation & Correspondance", "⚡ 2. Rapprochement & Analyses"])
+tab_pdf, tab_import, tab_matching = st.tabs(["📄 Convertisseur PDF en Excel", "📂 1. Importation & Correspondance", "⚡ 2. Rapprochement & Analyses"])
+
+with tab_pdf:
+    st.markdown("### 📄 Convertisseur intelligent de Relevés PDF en Excel")
+    st.write("Téléchargez un relevé bancaire PDF (ex: Attijariwafa bank) contenant plusieurs pages, et laissez Gemini 2.5 Flash extraire toutes les transactions sous forme de tableau Excel propre.")
+    
+    uploaded_pdf = st.file_uploader("Déposer le relevé bancaire PDF", type=["pdf"], key="uploaded_pdf_uploader")
+    
+    if uploaded_pdf is not None:
+        st.info(f"Fichier chargé : `{uploaded_pdf.name}` ({len(uploaded_pdf.getvalue()) / 1024:.1f} Ko)")
+        
+        if st.button("⚡ Convertir en Excel avec Gemini 2.5", type="primary", use_container_width=True):
+            with st.spinner("Analyse du relevé et extraction des transactions en cours (cela peut prendre de 1 à 2 minutes)..."):
+                try:
+                    pdf_bytes = uploaded_pdf.getvalue()
+                    df_extracted = extract_bank_statement_pdf(pdf_bytes)
+                    
+                    st.success(f"Extraction réussie ! **{len(df_extracted)}** transactions ont été extraites avec succès.")
+                    
+                    # Affichage des métriques de contrôle
+                    sum_deb = df_extracted['debit'].fillna(0).sum()
+                    sum_cre = df_extracted['credit'].fillna(0).sum()
+                    
+                    col_st1, col_st2 = st.columns(2)
+                    with col_st1:
+                        st.metric("Total Débits Extraits", f"{sum_deb:,.2f} DH")
+                    with col_st2:
+                        st.metric("Total Crédits Extraits", f"{sum_cre:,.2f} DH")
+                        
+                    # Aperçu
+                    st.markdown("#### 👀 Aperçu des données extraites")
+                    st.dataframe(df_extracted, use_container_width=True)
+                    
+                    # Génération Excel
+                    excel_output = io.BytesIO()
+                    with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
+                        df_extracted.to_excel(writer, index=False, sheet_name="Relevé Extrait")
+                    excel_bytes = excel_output.getvalue()
+                    
+                    st.download_button(
+                        label="📥 Télécharger le relevé au format Excel",
+                        data=excel_bytes,
+                        file_name=f"{os.path.splitext(uploaded_pdf.name)[0]}_extrait.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    
+                except Exception as e:
+                    st.error(f"Une erreur est survenue lors de l'extraction : {str(e)}")
 
 with tab_import:
     st.markdown("### 📥 Importation des données comptables et bancaires")

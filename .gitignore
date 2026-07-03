@@ -8,3 +8,9 @@ ENV/
 env/
 .env
 .streamlit/
+*.xlsx
+*.xls
+*credentials.json
+.tmp_credentials.json
+*.pdf
+
