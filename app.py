@@ -28,53 +28,64 @@ if "authenticated" not in st.session_state:
 if not st.session_state.authenticated:
     st.markdown("""
         <style>
-        .login-card {
-            max-width: 450px;
-            margin: 8% auto;
-            padding: 2.5rem;
-            background: #FFFFFF;
-            border-radius: 16px;
-            border: 1px solid #E2E8F0;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
-            text-align: center;
+        /* Masquer la barre latérale sur l'écran de connexion */
+        [data-testid="stSidebar"] {
+            display: none;
         }
-        .login-title {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: #0F172A;
-            margin-top: 1rem;
-            margin-bottom: 0.5rem;
+        /* Ajuster le conteneur principal de Streamlit pour le centrer */
+        .main .block-container {
+            max-width: 480px !important;
+            padding-top: 8rem !important;
+            padding-bottom: 5rem !important;
+            margin: auto !important;
         }
-        .login-subtitle {
-            font-size: 0.9rem;
-            color: #64748B;
-            margin-bottom: 2rem;
+        /* Arrière-plan dégradé moderne bleu nuit / ardoise */
+        .stApp {
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%) !important;
+        }
+        /* Styliser le formulaire Streamlit sous forme de carte blanche premium */
+        div[data-testid="stForm"] {
+            background-color: #FFFFFF !important;
+            border-radius: 16px !important;
+            border: 1px solid #E2E8F0 !important;
+            padding: 2.5rem !important;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+        }
+        /* Cacher la bordure par défaut de Streamlit */
+        div[data-testid="stForm"] > div {
+            border: none !important;
+            padding: 0 !important;
         }
         </style>
     """, unsafe_allow_html=True)
     
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    
-    # Centrer le logo
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/1/1a/MAN_Logo_2012.svg", width=120)
+    with st.container():
+        # Utiliser un PNG propre de Wikipédia pour éviter le problème d'affichage SVG sur Streamlit
+        logo_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/MAN_Logo_2012.svg/250px-MAN_Logo_2012.svg.png"
         
-    st.markdown('<div class="login-title">Accès Sécurisé</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-subtitle">Veuillez saisir votre code d\'accès pour accéder à la plateforme de rapprochement MAN Truck.</div>', unsafe_allow_html=True)
-    
-    # Zone de saisie
-    code_input = st.text_input("Code d'accès", type="password", key="login_code_input", label_visibility="collapsed", placeholder="Saisir le code d'accès (ex: MAN2026)")
-    
-    if st.button("Se connecter 🔓", type="primary", use_container_width=True):
-        if code_input == "MAN2026":
-            st.session_state.authenticated = True
-            st.toast("Connexion réussie !", icon="✅")
-            st.rerun()
-        else:
-            st.error("Code d'accès incorrect. Veuillez réessayer.")
+        with st.form("login_form", clear_on_submit=False):
+            st.markdown(f"""
+                <div style="text-align: center;">
+                    <img src="{logo_url}" style="width: 110px; margin-bottom: 1.5rem;" alt="MAN Logo">
+                    <h2 style="font-size: 1.6rem; font-weight: 700; color: #0F172A; margin: 0 0 0.5rem 0; font-family: 'Plus Jakarta Sans', sans-serif;">Accès Sécurisé</h2>
+                    <p style="font-size: 0.85rem; color: #64748B; margin: 0 0 2rem 0; line-height: 1.4; font-family: 'Plus Jakarta Sans', sans-serif;">
+                        Veuillez saisir votre code d'accès pour accéder à la plateforme de rapprochement bancaire MAN Truck.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
             
-    st.markdown('</div>', unsafe_allow_html=True)
+            # Saisie et validation du code
+            code_input = st.text_input("Code d'accès", type="password", placeholder="Saisir le code d'accès (ex: MAN2026)")
+            submit = st.form_submit_button("Se connecter 🔓", use_container_width=True, type="primary")
+            
+            if submit:
+                if code_input == "MAN2026":
+                    st.session_state.authenticated = True
+                    st.toast("Connexion réussie !", icon="✅")
+                    st.rerun()
+                else:
+                    st.error("Code d'accès incorrect. Veuillez réessayer.")
+                    
     st.stop() # Arrêter le rendu du reste de la page
 
 
