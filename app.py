@@ -88,7 +88,7 @@ if not st.session_state.authenticated:
             """, unsafe_allow_html=True)
             
             # Saisie et validation du code
-            code_input = st.text_input("Code d'accès", type="password", placeholder="Saisir le code d'accès (ex: MAN2026)")
+            code_input = st.text_input("Code d'accès", type="password", placeholder="Saisir le code d'accès...")
             submit = st.form_submit_button("Se connecter 🔓", use_container_width=True, type="primary")
             
             if submit:
