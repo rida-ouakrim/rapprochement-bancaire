@@ -20,9 +20,18 @@ def extract_remise_ref(text):
     if pd.isna(text):
         return ""
     text = str(text).upper().replace('É', 'E').replace('È', 'E')
+    
+    # 1. Tenter un matching direct comme REMISE 12345
     match = re.search(r'REMISE\s*0*(\d+)', text)
     if match:
         return match.group(1)
+        
+    # 2. Si le mot "REMISE" est présent, chercher n'importe quelle séquence de 5 chiffres ou plus
+    if "REMISE" in text:
+        match = re.search(r'\b0*(\d{5,})\b', text)
+        if match:
+            return match.group(1)
+            
     return ""
 
 def extract_features(text):
@@ -61,6 +70,15 @@ def extract_features(text):
     # 4. Remises
     if "REMISE" in text:
         op_type = "REMISE"
+        # Chercher une référence numérique de 5 chiffres ou plus
+        ref_match = re.search(r'\b0*(\d{5,})\b', text)
+        if ref_match:
+            extracted_ref = ref_match.group(1)
+        else:
+            # Fallback direct REMISE 123
+            ref_match = re.search(r'REMISE\s*0*(\d+)', text)
+            if ref_match:
+                extracted_ref = ref_match.group(1)
         return extracted_ref, op_type
         
     # 5. Frais / Agio
